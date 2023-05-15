@@ -5,12 +5,9 @@ struct Neuron<const N: usize> {
 }
 
 /// Activation function
+/// Rectified Linear Unit
 fn activate(val: f64) -> f64 {
-    if val < 0f64 {
-        0f64
-    } else {
-        val
-    }
+    val.max(0f64)
 }
 
 impl<const N: usize> Neuron<N> {
@@ -25,3 +22,25 @@ impl<const N: usize> Neuron<N> {
         )
     }
 }
+
+pub struct ModelBuilder {
+    hidden_layers: Option<Vec<Vec<Neuron>>>,
+    output_layer: Option<Vec<Neuron>>,
+}
+
+impl ModelBuilder {
+    fn new() {
+        Self {
+            hidden_layers: None,
+            output_layer: None,
+        }
+    }
+    fn hidden(mut self, size: usize) -> Self {
+        match self.hidden_layers {
+            Some(_) => todo!(),
+            None => todo!(),
+        }
+    }
+}
+
+struct Model {}
