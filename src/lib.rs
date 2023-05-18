@@ -1,16 +1,10 @@
-#[derive(Debug, Clone, Copy)]
-struct Node<const N: usize> {
-    weights: [f64; N],
-    bias: f64,
-}
+use log::*;
+use rand::Rng;
 
-impl<const N: usize> Default for Node<N> {
-    fn default() -> Self {
-        Self {
-            weights: [0f64; N],
-            bias: 0f64,
-        }
-    }
+#[derive(Debug, Clone)]
+struct Neuron {
+    weights: Vec<f64>,
+    bias: f64,
 }
 
 /// Activation function
@@ -19,25 +13,32 @@ fn activate(val: f64) -> f64 {
     val.max(0f64)
 }
 
+#[derive(Debug)]
 pub enum NeuronError {
     InputsMismatch,
 }
 
-trait Neuron {
-    fn activate(&mut self, inputs: &[f64]) -> Result<f64, NeuronError>;
-}
+impl Neuron {
+    fn new(num_inputs: usize) -> Self {
+        let mut rng = rand::thread_rng();
+        let mut weights = vec![0f64; num_inputs];
+        rng.fill(weights.as_mut_slice());
+        Self {
+            weights,
+            bias: rng.gen(),
+        }
+    }
 
-impl<const N: usize> Neuron for Node<N> {
     fn activate(&mut self, inputs: &[f64]) -> Result<f64, NeuronError> {
         if inputs.len() != self.weights.len() {
             return Err(NeuronError::InputsMismatch);
         }
 
         let val = activate(
-            inputs
-                .into_iter()
-                .zip(self.weights)
-                .map(|(i, w)| i * w)
+            self.weights
+                .iter()
+                .zip(inputs)
+                .map(|(w, i)| i * w)
                 .fold(0f64, |acc, x| acc + x)
                 + self.bias,
         );
@@ -68,6 +69,7 @@ impl NetworkBuilder {
     }
 
     pub fn input(mut self, size: usize) -> Self {
+        debug!("Input size set to {size}");
         self.input_layer_size = size;
         self
     }
@@ -75,36 +77,50 @@ impl NetworkBuilder {
     pub fn hidden(mut self, size: usize) -> Self {
         if self.hidden_layer_sizes.is_empty() {
             self.hidden_layer_sizes = vec![size];
+            debug!("Hidden layers now has single layer of size {size}");
         } else {
             self.hidden_layer_sizes.push(size);
+            debug!(
+                "Now has {} hidden layers, latest is size {size}",
+                self.hidden_layer_sizes.len()
+            );
         }
         self
     }
 
     pub fn output(mut self, size: usize) -> Self {
+        debug!("Input size set to {size}");
         self.output_layer_size = size;
         self
     }
 
     pub fn finalize<const I: usize, const H: usize, const O: usize>(self) -> Network<I, H, O> {
-        let mut layers: Vec<Vec<Box<dyn Neuron>>> = vec![vec![]; self.hidden_layer_sizes.len()];
-        let mut prev_layer_size = 0;
+        let mut layers: Vec<Vec<Neuron>> = vec![vec![]; H];
+        let mut prev_layer_size = I;
         layers
             .iter_mut()
             .zip(self.hidden_layer_sizes)
-            .map(|(a, b)| {
+            .for_each(|(a, b)| {
+                debug!("Layer {a:?} being filled with {b} neurons with prev_layer_size: {prev_layer_size}");
                 for _ in 0..b {
-                    a.push(Box::<Node<{ prev_layer_size }>>::new(Node::default()));
+                    a.push(Neuron::new(prev_layer_size));
                 }
                 prev_layer_size = b;
             });
-        todo!()
+        let output_layer = [(); O].map(|_| Neuron::new(prev_layer_size));
+        assert_eq!(I, self.input_layer_size);
+        assert_eq!(H, layers.len());
+        assert_eq!(O, self.output_layer_size);
+        Network {
+            hidden_layers: layers.try_into().unwrap(),
+            output_layer,
+        }
     }
 }
 
 pub struct Network<const I: usize, const H: usize, const O: usize> {
-    hidden_layers: [Vec<Box<dyn Neuron>>; H],
-    output_layer: [Box<dyn Neuron>; O],
+    hidden_layers: [Vec<Neuron>; H],
+    output_layer: [Neuron; O],
 }
 
 fn softmax<const T: usize>(data: [f64; T]) -> [f64; T] {
@@ -129,14 +145,32 @@ impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
         Ok(output_normalized)
     }
 
-    fn compute_layer(
-        inputs: &[f64],
-        layer: &mut [Box<dyn Neuron>],
-    ) -> Result<Vec<f64>, NeuronError> {
+    fn compute_layer(inputs: &[f64], layer: &mut [Neuron]) -> Result<Vec<f64>, NeuronError> {
         let output = layer
             .iter_mut()
-            .map(|n| -> Result<f64, NeuronError> { Ok(n.activate(inputs)?) })
+            .map(|n| -> Result<f64, NeuronError> { n.activate(inputs) })
             .collect::<Result<Vec<f64>, NeuronError>>()?;
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn do_log() {
+        std::env::set_var("RUST_LOG", "debug");
+        env_logger::init();
+    }
+
+    #[test]
+    fn make_network() {
+        do_log();
+        let mut net = NetworkBuilder::new()
+            .input(1)
+            .hidden(1)
+            .output(1)
+            .finalize::<1, 1, 1>();
+        assert!(net.compute([1f64]).unwrap()[0] >= 0f64);
     }
 }
