@@ -1,3 +1,4 @@
+use crate::math;
 use log::*;
 use rand::Rng;
 
@@ -5,12 +6,6 @@ use rand::Rng;
 struct Neuron {
     weights: Vec<f64>,
     bias: f64,
-}
-
-/// Activation function
-/// Rectified Linear Unit
-fn relu(val: f64) -> f64 {
-    val.max(0f64)
 }
 
 impl Neuron {
@@ -25,16 +20,14 @@ impl Neuron {
     }
 
     fn activate(&mut self, inputs: &[f64]) -> f64 {
-        let val = relu(
+        math::relu(
             self.weights
                 .iter()
                 .zip(inputs)
                 .map(|(w, i)| i * w)
                 .fold(0f64, |acc, x| acc + x)
                 + self.bias,
-        );
-
-        val
+        )
     }
 }
 
@@ -99,9 +92,6 @@ impl NetworkBuilder {
                 prev_layer_size = b;
             });
         let output_layer = [(); O].map(|_| Neuron::new(prev_layer_size));
-        assert_eq!(I, self.input_layer_size);
-        assert_eq!(H, layers.len());
-        assert_eq!(O, self.output_layer_size);
         Network {
             hidden_layers: layers.try_into().unwrap(),
             output_layer,
@@ -114,16 +104,6 @@ pub struct Network<const I: usize, const H: usize, const O: usize> {
     output_layer: [Neuron; O],
 }
 
-fn softmax<const T: usize>(data: [f64; T]) -> [f64; T] {
-    let exponents = data.into_iter().map(|el| el.exp());
-    let sum = exponents.clone().fold(0f64, |acc, el| acc + el);
-    exponents
-        .map(|el| el / sum)
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("Arrays length do not match")
-}
-
 impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
     pub fn compute(&mut self, inputs: [f64; I]) -> [f64; O] {
         let mut inputs = inputs.to_vec();
@@ -132,7 +112,7 @@ impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
         }
         let outputs = Self::compute_layer(&inputs, &mut self.output_layer);
 
-        softmax(outputs.try_into().expect("Vec of incorrect length"))
+        math::softmax(outputs.try_into().expect("Vec of incorrect length"))
     }
 
     fn compute_layer(inputs: &[f64], layer: &mut [Neuron]) -> Vec<f64> {
