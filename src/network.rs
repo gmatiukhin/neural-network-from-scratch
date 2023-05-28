@@ -3,9 +3,9 @@ use log::*;
 use rand::Rng;
 
 #[derive(Debug, Clone)]
-struct Neuron {
-    weights: Vec<f64>,
-    bias: f64,
+pub(crate) struct Neuron {
+    pub(crate) weights: Vec<f64>,
+    pub(crate) bias: f64,
 }
 
 impl Neuron {
@@ -19,7 +19,7 @@ impl Neuron {
         }
     }
 
-    fn activate(&mut self, inputs: &[f64]) -> f64 {
+    fn activate(&self, inputs: &[f64]) -> f64 {
         math::relu(
             self.weights
                 .iter()
@@ -100,24 +100,24 @@ impl NetworkBuilder {
 }
 
 pub struct Network<const I: usize, const H: usize, const O: usize> {
-    hidden_layers: [Vec<Neuron>; H],
-    output_layer: [Neuron; O],
+    pub(crate) hidden_layers: [Vec<Neuron>; H],
+    pub(crate) output_layer: [Neuron; O],
 }
 
 impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
-    pub fn compute(&mut self, inputs: [f64; I]) -> [f64; O] {
+    pub fn compute(&self, inputs: [f64; I]) -> [f64; O] {
         let mut inputs = inputs.to_vec();
-        for layer in &mut self.hidden_layers {
+        for layer in &self.hidden_layers {
             inputs = Self::compute_layer(&inputs, layer);
         }
-        let outputs = Self::compute_layer(&inputs, &mut self.output_layer);
+        let outputs = Self::compute_layer(&inputs, &self.output_layer);
 
         math::softmax(outputs.try_into().expect("Vec of incorrect length"))
     }
 
-    fn compute_layer(inputs: &[f64], layer: &mut [Neuron]) -> Vec<f64> {
+    fn compute_layer(inputs: &[f64], layer: &[Neuron]) -> Vec<f64> {
         let output = layer
-            .iter_mut()
+            .iter()
             .map(|n| -> f64 { n.activate(inputs) })
             .collect::<Vec<f64>>();
         output
@@ -136,7 +136,7 @@ mod test {
     #[test]
     fn make_network() {
         do_log();
-        let mut net = NetworkBuilder::new()
+        let net = NetworkBuilder::new()
             .input(1)
             .hidden(1)
             .output(1)
