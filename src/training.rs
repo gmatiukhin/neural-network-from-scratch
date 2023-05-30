@@ -1,49 +1,32 @@
+use std::sync::{Arc, Mutex};
+use std::thread;
+
 use crate::{
     math,
-    network::{Network, Neuron},
+    network::{Network, NeuronData},
 };
 
-pub trait TrainableNetwork<const I: usize, const H: usize, const O: usize> {
-    fn node_loss(got: f64, expected: f64) -> f64;
-    fn node_loss_derivative(got: f64, expected: f64) -> f64;
-    fn network_loss(&self, network_output: [f64; O], expected_output: [f64; O]) -> f64;
-    fn update_gradients(&mut self, train_data: &TrainData<I, O>);
-    fn train(&mut self, train_data: &TrainData<I, O>, _learn_rate: f64, err_margin: f64);
+#[derive(Debug, Clone, Copy)]
+pub struct DataPoint<const I: usize, const O: usize> {
+    pub input: [f64; I],
+    pub expected_output: [f64; O],
 }
 
-impl<const I: usize, const H: usize, const O: usize> TrainableNetwork<I, H, O>
-    for Network<I, H, O>
-{
-    fn node_loss(got: f64, expected: f64) -> f64 {
-        let err = got - expected;
-        err * err
-    }
+fn update_gradients<const I: usize, const O: usize>(
+    network_data: Vec<Vec<NeuronData>>,
+    train_data: DataPoint<I, O>,
+    gradients: Arc<Mutex<NetworkGradients>>,
+) {
+    let mut prev_layer_node_der_values = vec![];
+    let mut partial_gradients: Vec<Vec<f64>> = vec![];
+    let mut prev_layer: Vec<NeuronData> = vec![];
 
-    fn node_loss_derivative(got: f64, expected: f64) -> f64 {
-        2f64 * (got - expected)
-    }
-
-    // NOTE: maybe declare self.compute in another trait
-    // that way it is possible to make this a default implementation
-    fn network_loss(&self, network_output: [f64; O], expected_output: [f64; O]) -> f64 {
-        network_output
-            .iter()
-            .zip(expected_output)
-            .fold(0f64, |acc, (&got, expected)| {
-                acc + Self::node_loss(got, expected)
-            })
-    }
-
-    fn update_gradients(&mut self, train_data: &TrainData<I, O>) {
-        let _ = self.compute(train_data.input);
-
-        let layer_data = self.export_data();
-        let mut prev_layer_node_der_values = vec![];
-        let mut gradients: Vec<Vec<f64>> = vec![];
-        let mut prev_layer: Vec<Neuron> = vec![];
-
-        // Backpropagation
-        layer_data.iter().rev().enumerate().for_each(|(i, layer)| {
+    // Backpropagation
+    network_data
+        .iter()
+        .rev()
+        .enumerate()
+        .for_each(|(i, layer)| {
             let mut layer_gradients = vec![];
             layer.iter().enumerate().for_each(|(j, neuron)| {
                 let neuron_der = if i == 0 {
@@ -51,25 +34,22 @@ impl<const I: usize, const H: usize, const O: usize> TrainableNetwork<I, H, O>
                     // For every neuron in the output layer:
                     // multiply the derivative of its activation function by
                     // the derivative of the loss function
-                    math::d_relu(neuron.weighted_input_sum.unwrap())
-                        * Self::node_loss_derivative(
-                            neuron.output.unwrap(),
-                            train_data.expected_output[j],
-                        )
+                    math::d_relu(neuron.weighted_input_sum)
+                        * node_loss_derivative(neuron.output, train_data.expected_output[j])
                 } else {
                     // Hidden layers
                     // For every neuron in the hidden layer
                     // multiply the derivative of its activation function by
                     // sum of the weights of the next layer neurons
                     // multiplied by their respective derivative values
-                    math::d_relu(neuron.weighted_input_sum.unwrap())
+                    math::d_relu(neuron.weighted_input_sum)
                         * prev_layer
                             .iter()
                             .enumerate()
                             .flat_map(|(k, node)| {
                                 node.weights
                                     .iter()
-                                    .map(|weight| weight * gradients.last().unwrap()[k])
+                                    .map(|weight| weight * partial_gradients.last().unwrap()[k])
                                     .collect::<Vec<_>>()
                             })
                             .sum::<f64>()
@@ -77,27 +57,249 @@ impl<const I: usize, const H: usize, const O: usize> TrainableNetwork<I, H, O>
                 layer_gradients.push(neuron_der);
                 prev_layer_node_der_values.push(neuron_der);
             });
-            prev_layer = layer.clone();
-            gradients.push(layer_gradients);
+            prev_layer = layer.to_vec();
+            partial_gradients.push(layer_gradients);
         });
-    }
 
-    fn train(&mut self, train_data: &TrainData<I, O>, _learn_rate: f64, err_margin: f64) {
-        let computation_result = self.compute(train_data.input);
-        let mut prev_loss = self.network_loss(computation_result, train_data.expected_output);
-        loop {
-            let computation_result = self.compute(train_data.input);
-            let loss = self.network_loss(computation_result, train_data.expected_output);
-            if (loss - prev_loss).abs() <= err_margin {
-                break;
-            }
-            prev_loss = loss;
-        }
+    {
+        let mut gradients = gradients.lock().unwrap();
+        gradients
+            .values
+            .iter_mut()
+            .zip(partial_gradients.iter().rev())
+            .zip(network_data)
+            .for_each(|((layer_gradients, layer_partial_gradient), layer_data)| {
+                (*layer_gradients)
+                    .iter_mut()
+                    .zip(layer_partial_gradient)
+                    .zip(layer_data)
+                    .for_each(
+                        |((neuron_gradient, neuron_partial_gradient), neuron_data)| {
+                            neuron_gradient
+                                .weights
+                                .iter_mut()
+                                .zip(neuron_data.inputs)
+                                .for_each(|(weight, input)| {
+                                    *weight += neuron_partial_gradient * input;
+                                });
+                            neuron_gradient.bias += neuron_partial_gradient;
+                        },
+                    );
+            });
+
+        // log::debug!("gradients\n{:#?}", gradients);
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct TrainData<const I: usize, const O: usize> {
-    pub input: [f64; I],
-    pub expected_output: [f64; O],
+#[derive(Debug)]
+pub(crate) struct Gradient {
+    pub(crate) weights: Vec<f64>,
+    pub(crate) bias: f64,
+}
+
+#[derive(Debug)]
+pub(crate) struct NetworkGradients {
+    pub(crate) values: Vec<Vec<Gradient>>,
+}
+
+impl NetworkGradients {
+    fn new<const I: usize, const H: usize, const O: usize>(network: &Network<I, H, O>) -> Self {
+        let mut values = vec![];
+
+        for l in &network.hidden_layers {
+            let mut layer = vec![];
+            for n in l {
+                layer.push(Gradient {
+                    weights: vec![0f64; n.weights.len()],
+                    bias: 0f64,
+                });
+            }
+            values.push(layer);
+        }
+
+        Self { values }
+    }
+}
+
+pub fn train<const I: usize, const H: usize, const O: usize>(
+    network: &mut Network<I, H, O>,
+    train_data: Vec<DataPoint<I, O>>,
+    learn_rate: f64,
+    iter: u32,
+) {
+    for _ in 0..iter {
+        let gradients = Arc::new(Mutex::new(NetworkGradients::new(network)));
+        for data in &train_data {
+            let data = data.to_owned();
+            let g = gradients.clone();
+            let n = network.clone();
+            let handle = thread::spawn(move || {
+                let res = n.compute(data.input);
+                update_gradients(res.layer_data, data, g);
+            });
+
+            handle.join().expect("Could not join training thread.");
+        }
+
+        network.apply_gradients(&gradients.lock().unwrap(), learn_rate);
+    }
+}
+
+fn node_loss(got: f64, expected: f64) -> f64 {
+    let err = got - expected;
+    err * err
+}
+
+fn node_loss_derivative(got: f64, expected: f64) -> f64 {
+    2f64 * (got - expected)
+}
+
+fn network_loss<const O: usize>(network_output: [f64; O], expected_output: [f64; O]) -> f64 {
+    network_output
+        .iter()
+        .zip(expected_output)
+        .fold(0f64, |acc, (&got, expected)| acc + node_loss(got, expected))
+}
+
+pub fn avg_network_loss<const I: usize, const H: usize, const O: usize>(
+    network: &Network<I, H, O>,
+    test_data: &[DataPoint<I, O>],
+) -> f64 {
+    test_data
+        .iter()
+        .map(|data_point| {
+            let res = network.compute(data_point.input);
+            // log::debug!(
+            //     "otput:{:?}\texpected:{:?}",
+            //     res.output,
+            //     data_point.expected_output
+            // );
+            network_loss(res.output, data_point.expected_output)
+        })
+        .sum::<f64>()
+        / (test_data.len() as f64)
+}
+
+#[cfg(test)]
+mod test {
+    use rand::Rng;
+
+    use crate::network::NetworkBuilder;
+
+    use super::*;
+
+    fn do_log() {
+        std::env::set_var("RUST_LOG", "debug");
+        env_logger::init();
+    }
+
+    fn generate_xor_test_data(
+        n: u32,
+        c: usize,
+    ) -> (Vec<Vec<DataPoint<2, 2>>>, Vec<DataPoint<2, 2>>) {
+        let mut rng = rand::thread_rng();
+        let mut train_data = vec![];
+        for _ in 0..n {
+            let x: f64 = rng.gen();
+            let y: f64 = rng.gen();
+
+            let expected_output = if (x > 0.5 && y > 0.5) || (x <= 0.5 && y <= 0.5) {
+                [1f64, 0f64]
+            } else {
+                [0f64, 1f64]
+            };
+            train_data.push(DataPoint {
+                input: [x, y],
+                expected_output,
+            });
+        }
+
+        let mut training_data = train_data.chunks(c).collect::<Vec<_>>();
+        let test_batch = training_data.pop().unwrap();
+        (
+            training_data.iter().map(|v| v.to_vec()).collect(),
+            test_batch.to_vec(),
+        )
+    }
+
+    #[test]
+    fn test_simple_learning() {
+        do_log();
+        let mut network = NetworkBuilder::new()
+            .input(2)
+            .hidden(2)
+            .hidden(2)
+            .output(2)
+            .finalize::<2, 2, 2>();
+
+        let (training_data, test_batch) = generate_xor_test_data(100, 10);
+        // log::debug!(
+        //     "data\ntraining: {:?}\ntest: {:?}",
+        //     training_data,
+        //     test_batch
+        // );
+
+        for batch in training_data {
+            train(&mut network, batch.to_vec(), 0.1, 10);
+            let avg_loss = avg_network_loss(&network, &test_batch);
+            log::info!("Avg loss: {}", avg_loss);
+            // log::debug!("Network\n{:#?}", network.hidden_layers);
+        }
+    }
+
+    fn generate_circle_test_data_one_of_two(
+        r: f64,
+        n: u32,
+        c: usize,
+    ) -> (Vec<Vec<DataPoint<2, 2>>>, Vec<DataPoint<2, 2>>) {
+        let r = r.clamp(0f64, 1f64);
+        let mut train_data = vec![];
+        let mut rng = rand::thread_rng();
+        for _ in 0..n {
+            let x: f64 = rng.gen();
+            let y: f64 = rng.gen();
+
+            let expected_output = if f64::sqrt(x * x + y * y) < r {
+                [1f64, 0f64]
+            } else {
+                [0f64, 1f64]
+            };
+            train_data.push(DataPoint {
+                input: [x, y],
+                expected_output,
+            });
+        }
+
+        let mut training_data = train_data.chunks(c).collect::<Vec<_>>();
+        let test_batch = training_data.pop().unwrap();
+        (
+            training_data.iter().map(|v| v.to_vec()).collect(),
+            test_batch.to_vec(),
+        )
+    }
+
+    #[test]
+    fn test_learning() {
+        do_log();
+        let mut network = NetworkBuilder::new()
+            .input(2)
+            .hidden(2)
+            .hidden(2)
+            .output(2)
+            .finalize::<2, 2, 2>();
+
+        let (training_data, test_batch) = generate_circle_test_data_one_of_two(5f64, 10, 1);
+        // log::debug!(
+        //     "data\ntraining: {:?}\ntest: {:?}",
+        //     training_data,
+        //     test_batch
+        // );
+
+        for batch in training_data {
+            train(&mut network, batch.to_vec(), 0.1, 1);
+            let avg_loss = avg_network_loss(&network, &test_batch);
+            log::info!("Avg loss: {}", avg_loss);
+            // log::debug!("Network\n{:#?}", network.hidden_layers);
+        }
+    }
 }

@@ -1,1 +1,1 @@
-Making Neural Networks from scratch at RUDN.
+Making neural network from scratch at RUDN.

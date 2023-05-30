@@ -1,14 +1,11 @@
-use crate::math;
+use crate::{math, training::NetworkGradients};
 use log;
 use rand::Rng;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Neuron {
-    pub(crate) inputs: Option<Vec<f64>>,
     pub(crate) weights: Vec<f64>,
     pub(crate) bias: f64,
-    pub(crate) output: Option<f64>,
-    pub(crate) weighted_input_sum: Option<f64>,
 }
 
 impl Neuron {
@@ -19,28 +16,38 @@ impl Neuron {
         Self {
             weights,
             bias: rng.gen(),
-            inputs: None,
-            output: None,
-            weighted_input_sum: None,
         }
     }
 
-    fn activate(&mut self, inputs: &[f64]) -> f64 {
-        let weighted_sum = self
+    fn activate(&self, inputs: &[f64]) -> (f64, NeuronData) {
+        let weighted_input_sum = self
             .weights
             .iter()
             .zip(inputs)
             .map(|(w, i)| i * w)
             .fold(0f64, |acc, x| acc + x)
             + self.bias;
-        let output = math::relu(weighted_sum);
+        let output = math::relu(weighted_input_sum);
 
-        self.weighted_input_sum = Some(weighted_sum);
-        self.output = Some(output);
-        self.inputs = Some(inputs.to_vec());
+        let data = NeuronData {
+            weighted_input_sum,
+            output,
+            inputs: inputs.to_vec(),
+            weights: self.weights.clone(),
+            bias: self.bias,
+        };
 
-        output
+        (output, data)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct NeuronData {
+    pub inputs: Vec<f64>,
+    pub weights: Vec<f64>,
+    pub bias: f64,
+    pub output: f64,
+    pub weighted_input_sum: f64,
 }
 
 pub struct NetworkBuilder {
@@ -103,37 +110,63 @@ impl NetworkBuilder {
                 }
                 prev_layer_size = b;
             });
+        log::debug!("hidden layers: {:?}", layers);
         Network {
             hidden_layers: layers.try_into().unwrap(),
         }
     }
 }
 
+#[derive(Debug)]
+pub struct NetworkResult<const O: usize> {
+    pub output: [f64; O],
+    pub layer_data: Vec<Vec<NeuronData>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Network<const I: usize, const H: usize, const O: usize> {
-    hidden_layers: [Vec<Neuron>; H],
+    pub(crate) hidden_layers: [Vec<Neuron>; H],
 }
 
 impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
-    pub fn compute(&mut self, inputs: [f64; I]) -> [f64; O] {
+    pub fn compute(&self, inputs: [f64; I]) -> NetworkResult<O> {
         let mut layer_result = inputs.to_vec();
-        for layer in &mut self.hidden_layers {
-            layer_result = Self::compute_layer(&layer_result, layer);
+        let mut layer_data = vec![];
+        for layer in &self.hidden_layers {
+            let comp_res = Self::compute_layer(&layer_result, layer);
+            layer_result = comp_res.0;
+            layer_data.push(comp_res.1);
         }
+        // log::debug!("before softmax: {layer_result:?}");
+        // let output =
+        //     math::log_softmax::<O>(layer_result.try_into().expect("Vec of incorrect length"));
+        // log::debug!("after softmax: {output:?}");
 
-        math::softmax::<O>(layer_result.try_into().expect("Vec of incorrect length"))
+        NetworkResult {
+            output: layer_result.try_into().unwrap(),
+            layer_data,
+        }
     }
 
-    fn compute_layer(inputs: &[f64], layer: &mut [Neuron]) -> Vec<f64> {
-        let output = layer
+    fn compute_layer(inputs: &[f64], layer: &[Neuron]) -> (Vec<f64>, Vec<NeuronData>) {
+        layer.iter().map(|n| n.activate(inputs)).unzip()
+    }
+
+    pub(crate) fn apply_gradients(&mut self, gradients: &NetworkGradients, learn_rate: f64) {
+        self.hidden_layers
             .iter_mut()
-            .map(|n| -> f64 { n.activate(inputs) })
-            .collect::<Vec<f64>>();
-        output
-    }
-
-    pub(crate) fn export_data(&self) -> Vec<Vec<Neuron>> {
-        self.hidden_layers.to_vec()
+            .flatten()
+            .zip(gradients.values.iter().flatten())
+            .for_each(|(neuron, gradient)| {
+                neuron
+                    .weights
+                    .iter_mut()
+                    .zip(&gradient.weights)
+                    .for_each(|(nw, gw)| {
+                        *nw += gw * learn_rate;
+                    });
+                neuron.bias += gradient.bias * learn_rate;
+            });
     }
 }
 
@@ -149,11 +182,23 @@ mod test {
     #[test]
     fn make_network() {
         do_log();
-        let mut net = NetworkBuilder::new()
+        let net = NetworkBuilder::new()
             .input(1)
             .hidden(1)
             .output(1)
             .finalize::<1, 1, 1>();
-        assert!(net.compute([1f64])[0] >= 0f64);
+        assert!(net.compute([1f64]).output[0] >= 0f64);
+    }
+
+    #[test]
+    fn make_bigger_network() {
+        do_log();
+        let net = NetworkBuilder::new()
+            .input(2)
+            .hidden(3)
+            .hidden(2)
+            .output(2)
+            .finalize::<2, 2, 2>();
+        assert!(net.compute([1f64, 3.5]).output[0] >= 0f64);
     }
 }
