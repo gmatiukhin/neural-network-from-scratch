@@ -25,8 +25,8 @@ impl Neuron {
             .iter()
             .zip(inputs)
             .map(|(w, i)| i * w)
-            .fold(0f64, |acc, x| acc + x)
-            + self.bias;
+            .fold(self.bias, |acc, x| acc + x);
+
         let output = math::sigmoid(weighted_input_sum);
 
         let data = NeuronData {
@@ -103,8 +103,9 @@ impl NetworkBuilder {
         layers
             .iter_mut()
             .zip(self.hidden_layer_sizes)
-            .for_each(|(a, b)| {
-                log::debug!("Layer {a:?} being filled with {b} neurons with prev_layer_size: {prev_layer_size}");
+            .enumerate()
+            .for_each(|(i, (a, b))| {
+                log::debug!("Layer {i} being filled with {b} neurons with prev_layer_size: {prev_layer_size}");
                 for _ in 0..b {
                     a.push(Neuron::new(prev_layer_size));
                 }
@@ -163,6 +164,8 @@ impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
                     });
                 neuron.bias += gradient.bias * learn_rate;
             });
+
+        log::debug!("values=\n{:?}", self.hidden_layers);
     }
 }
 
@@ -191,7 +194,7 @@ mod test {
         do_log();
         let net = NetworkBuilder::new()
             .input(2)
-            .hidden(3)
+            .hidden(2)
             .hidden(2)
             .output(2)
             .finalize::<2, 2, 2>();

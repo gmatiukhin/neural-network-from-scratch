@@ -40,8 +40,8 @@ fn update_gradients<const I: usize, const O: usize>(
                     } else {
                         // Hidden layers
                         // For every neuron in the hidden layer
-                        // multiply the derivative of its activation function by
-                        // weights of the prevuous layer neurons
+                        // multiply the derivative of its activation function by the sum of
+                        // the weights of the prevuous layer neurons
                         // multiplied by their respective derivative values
                         math::d_sigmoid(neuron.weighted_input_sum)
                             * prev_layer
@@ -55,6 +55,8 @@ fn update_gradients<const I: usize, const O: usize>(
             prev_layer = layer.to_vec();
             common_gradient_parts.push(grad_parts);
         });
+
+    log::debug!("partial={common_gradient_parts:?}");
 
     {
         let mut gradients = gradients.lock().unwrap();
@@ -82,7 +84,7 @@ fn update_gradients<const I: usize, const O: usize>(
                     );
             });
 
-        // log::debug!("gradients\n{:#?}", gradients);
+        // log::debug!("gradients=\n{:?}", gradients);
     }
 }
 
@@ -161,11 +163,6 @@ pub fn avg_network_loss<const I: usize, const H: usize, const O: usize>(
         .iter()
         .map(|data_point| {
             let res = network.compute(data_point.input);
-            // log::debug!(
-            //     "got={:?}\texpected={:?}",
-            //     res.output,
-            //     data_point.expected_output
-            // );
             network_loss(res.output, data_point.expected_output)
         })
         .sum::<f64>()
@@ -185,53 +182,48 @@ mod test {
         env_logger::init();
     }
 
-    fn generate_xor_test_data(
-        n: u32,
-        c: usize,
-    ) -> (Vec<Vec<DataPoint<2, 2>>>, Vec<DataPoint<2, 2>>) {
-        let mut rng = rand::thread_rng();
-        let mut train_data = vec![];
-        for _ in 0..n {
-            let x: f64 = rng.gen();
-            let y: f64 = rng.gen();
-
-            let expected_output = if (x > 0.5 && y > 0.5) || (x <= 0.5 && y <= 0.5) {
-                [1f64, 0f64]
-            } else {
-                [0f64, 1f64]
-            };
-            train_data.push(DataPoint {
-                input: [x, y],
-                expected_output,
-            });
-        }
-
-        let mut training_data = train_data.chunks(c).collect::<Vec<_>>();
-        let test_batch = training_data.pop().unwrap();
-        (
-            training_data.iter().map(|v| v.to_vec()).collect(),
-            test_batch.to_vec(),
-        )
-    }
-
     #[test]
     fn test_learning() {
         do_log();
         let mut network = NetworkBuilder::new()
             .input(2)
             .hidden(2)
-            .hidden(2)
             .output(2)
-            .finalize::<2, 2, 2>();
+            .finalize::<2, 1, 2>();
 
-        let (training_data, test_batch) = generate_xor_test_data(1000, 10);
+        let (training_data, test_batch) = {
+            let mut data = vec![];
+            for _ in 0..100 {
+                let x: f64 = rand::thread_rng().gen();
+                let y: f64 = rand::thread_rng().gen();
+
+                let line = |x: f64| -> f64 { -x + 3f64 };
+                let expected_output = if y <= line(x) {
+                    [1f64, 0f64]
+                } else {
+                    [0f64, 1f64]
+                };
+
+                data.push(DataPoint::<2, 2> {
+                    input: [x, y],
+                    expected_output,
+                });
+            }
+
+            let mut train_data = data
+                .chunks(50)
+                .map(|el| el.to_vec())
+                .collect::<Vec<Vec<_>>>();
+            let test = train_data.pop().unwrap();
+            (train_data, test)
+        };
         // log::debug!(
         //     "data\ntraining: {:?}\ntest: {:?}",
         //     training_data,
         //     test_batch
         // );
 
-        for _ in 0..1000 {
+        for _ in 0..10 {
             for batch in &training_data {
                 train(&mut network, batch.to_vec(), 0.5);
                 // log::debug!("{network:?}");
