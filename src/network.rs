@@ -27,7 +27,7 @@ impl Neuron {
             .map(|(w, i)| i * w)
             .fold(0f64, |acc, x| acc + x)
             + self.bias;
-        let output = math::relu(weighted_input_sum);
+        let output = math::sigmoid(weighted_input_sum);
 
         let data = NeuronData {
             weighted_input_sum,
@@ -137,10 +137,6 @@ impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
             layer_result = comp_res.0;
             layer_data.push(comp_res.1);
         }
-        // log::debug!("before softmax: {layer_result:?}");
-        // let output =
-        //     math::log_softmax::<O>(layer_result.try_into().expect("Vec of incorrect length"));
-        // log::debug!("after softmax: {output:?}");
 
         NetworkResult {
             output: layer_result.try_into().unwrap(),

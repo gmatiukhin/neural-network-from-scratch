@@ -17,8 +17,7 @@ fn update_gradients<const I: usize, const O: usize>(
     train_data: DataPoint<I, O>,
     gradients: Arc<Mutex<NetworkGradients>>,
 ) {
-    let mut prev_layer_node_der_values = vec![];
-    let mut partial_gradients: Vec<Vec<f64>> = vec![];
+    let mut common_gradient_parts: Vec<Vec<f64>> = vec![];
     let mut prev_layer: Vec<NeuronData> = vec![];
 
     // Backpropagation
@@ -27,38 +26,34 @@ fn update_gradients<const I: usize, const O: usize>(
         .rev()
         .enumerate()
         .for_each(|(i, layer)| {
-            let mut layer_gradients = vec![];
-            layer.iter().enumerate().for_each(|(j, neuron)| {
-                let neuron_der = if i == 0 {
-                    // Output layer
-                    // For every neuron in the output layer:
-                    // multiply the derivative of its activation function by
-                    // the derivative of the loss function
-                    math::d_relu(neuron.weighted_input_sum)
-                        * node_loss_derivative(neuron.output, train_data.expected_output[j])
-                } else {
-                    // Hidden layers
-                    // For every neuron in the hidden layer
-                    // multiply the derivative of its activation function by
-                    // sum of the weights of the next layer neurons
-                    // multiplied by their respective derivative values
-                    math::d_relu(neuron.weighted_input_sum)
-                        * prev_layer
-                            .iter()
-                            .enumerate()
-                            .flat_map(|(k, node)| {
-                                node.weights
-                                    .iter()
-                                    .map(|weight| weight * partial_gradients.last().unwrap()[k])
-                                    .collect::<Vec<_>>()
-                            })
-                            .sum::<f64>()
-                };
-                layer_gradients.push(neuron_der);
-                prev_layer_node_der_values.push(neuron_der);
-            });
+            let grad_parts = layer
+                .iter()
+                .enumerate()
+                .map(|(j, neuron)| {
+                    if i == 0 {
+                        // Output layer
+                        // For every neuron in the output layer:
+                        // multiply the derivative of its activation function by
+                        // the derivative of the loss function
+                        math::d_sigmoid(neuron.weighted_input_sum)
+                            * node_loss_derivative(neuron.output, train_data.expected_output[j])
+                    } else {
+                        // Hidden layers
+                        // For every neuron in the hidden layer
+                        // multiply the derivative of its activation function by
+                        // weights of the prevuous layer neurons
+                        // multiplied by their respective derivative values
+                        math::d_sigmoid(neuron.weighted_input_sum)
+                            * prev_layer
+                                .iter()
+                                .zip(common_gradient_parts.last().unwrap())
+                                .map(|(node, der)| node.weights[j] * der)
+                                .sum::<f64>()
+                    }
+                })
+                .collect::<Vec<_>>();
             prev_layer = layer.to_vec();
-            partial_gradients.push(layer_gradients);
+            common_gradient_parts.push(grad_parts);
         });
 
     {
@@ -66,7 +61,7 @@ fn update_gradients<const I: usize, const O: usize>(
         gradients
             .values
             .iter_mut()
-            .zip(partial_gradients.iter().rev())
+            .zip(common_gradient_parts.iter().rev())
             .zip(network_data)
             .for_each(|((layer_gradients, layer_partial_gradient), layer_data)| {
                 (*layer_gradients)
@@ -125,24 +120,21 @@ pub fn train<const I: usize, const H: usize, const O: usize>(
     network: &mut Network<I, H, O>,
     train_data: Vec<DataPoint<I, O>>,
     learn_rate: f64,
-    iter: u32,
 ) {
-    for _ in 0..iter {
-        let gradients = Arc::new(Mutex::new(NetworkGradients::new(network)));
-        for data in &train_data {
-            let data = data.to_owned();
-            let g = gradients.clone();
-            let n = network.clone();
-            let handle = thread::spawn(move || {
-                let res = n.compute(data.input);
-                update_gradients(res.layer_data, data, g);
-            });
+    let gradients = Arc::new(Mutex::new(NetworkGradients::new(network)));
+    for data in &train_data {
+        let data = data.to_owned();
+        let g = gradients.clone();
+        let n = network.clone();
+        let handle = thread::spawn(move || {
+            let res = n.compute(data.input);
+            update_gradients(res.layer_data, data, g);
+        });
 
-            handle.join().expect("Could not join training thread.");
-        }
-
-        network.apply_gradients(&gradients.lock().unwrap(), learn_rate);
+        handle.join().expect("Could not join training thread.");
     }
+
+    network.apply_gradients(&gradients.lock().unwrap(), learn_rate);
 }
 
 fn node_loss(got: f64, expected: f64) -> f64 {
@@ -170,7 +162,7 @@ pub fn avg_network_loss<const I: usize, const H: usize, const O: usize>(
         .map(|data_point| {
             let res = network.compute(data_point.input);
             // log::debug!(
-            //     "otput:{:?}\texpected:{:?}",
+            //     "got={:?}\texpected={:?}",
             //     res.output,
             //     data_point.expected_output
             // );
@@ -223,62 +215,6 @@ mod test {
     }
 
     #[test]
-    fn test_simple_learning() {
-        do_log();
-        let mut network = NetworkBuilder::new()
-            .input(2)
-            .hidden(2)
-            .hidden(2)
-            .output(2)
-            .finalize::<2, 2, 2>();
-
-        let (training_data, test_batch) = generate_xor_test_data(100, 10);
-        // log::debug!(
-        //     "data\ntraining: {:?}\ntest: {:?}",
-        //     training_data,
-        //     test_batch
-        // );
-
-        for batch in training_data {
-            train(&mut network, batch.to_vec(), 0.1, 10);
-            let avg_loss = avg_network_loss(&network, &test_batch);
-            log::info!("Avg loss: {}", avg_loss);
-            // log::debug!("Network\n{:#?}", network.hidden_layers);
-        }
-    }
-
-    fn generate_circle_test_data_one_of_two(
-        r: f64,
-        n: u32,
-        c: usize,
-    ) -> (Vec<Vec<DataPoint<2, 2>>>, Vec<DataPoint<2, 2>>) {
-        let r = r.clamp(0f64, 1f64);
-        let mut train_data = vec![];
-        let mut rng = rand::thread_rng();
-        for _ in 0..n {
-            let x: f64 = rng.gen();
-            let y: f64 = rng.gen();
-
-            let expected_output = if f64::sqrt(x * x + y * y) < r {
-                [1f64, 0f64]
-            } else {
-                [0f64, 1f64]
-            };
-            train_data.push(DataPoint {
-                input: [x, y],
-                expected_output,
-            });
-        }
-
-        let mut training_data = train_data.chunks(c).collect::<Vec<_>>();
-        let test_batch = training_data.pop().unwrap();
-        (
-            training_data.iter().map(|v| v.to_vec()).collect(),
-            test_batch.to_vec(),
-        )
-    }
-
-    #[test]
     fn test_learning() {
         do_log();
         let mut network = NetworkBuilder::new()
@@ -288,18 +224,23 @@ mod test {
             .output(2)
             .finalize::<2, 2, 2>();
 
-        let (training_data, test_batch) = generate_circle_test_data_one_of_two(5f64, 10, 1);
+        let (training_data, test_batch) = generate_xor_test_data(1000, 10);
         // log::debug!(
         //     "data\ntraining: {:?}\ntest: {:?}",
         //     training_data,
         //     test_batch
         // );
 
-        for batch in training_data {
-            train(&mut network, batch.to_vec(), 0.1, 1);
-            let avg_loss = avg_network_loss(&network, &test_batch);
-            log::info!("Avg loss: {}", avg_loss);
-            // log::debug!("Network\n{:#?}", network.hidden_layers);
+        for _ in 0..1000 {
+            for batch in &training_data {
+                train(&mut network, batch.to_vec(), 0.5);
+                // log::debug!("{network:?}");
+                let avg_loss = avg_network_loss(&network, &test_batch);
+                log::info!("Avg loss: {}", avg_loss);
+                // log::debug!("Network\n{:#?}", network.hidden_layers);
+            }
         }
+        let fin_loss = avg_network_loss(&network, &test_batch);
+        log::info!("Final loss: {}", fin_loss);
     }
 }
