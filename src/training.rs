@@ -1,6 +1,6 @@
-use std::sync::{Arc, Mutex};
-use rayon::prelude::*;
 use log::debug;
+use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
 
 use crate::{
     math,
@@ -25,27 +25,26 @@ fn update_gradients<const I: usize, const H: usize, const O: usize>(
     for (i, layer) in network_data.iter().rev().enumerate() {
         let mut grad_parts = vec![];
         for (j, neuron) in layer.iter().enumerate() {
-            let value;
-            if i == 0 {
+            let value = if i == 0 {
                 // Output layer
                 // For every neuron in the output layer:
                 // multiply the derivative of its activation function by
                 // the derivative of the loss function
-                value = math::d_sigmoid(neuron.weighted_input_sum)
-                    * node_loss_derivative(neuron.output, train_data.expected_output[j]);
+                math::d_sigmoid(neuron.weighted_input_sum)
+                    * node_loss_derivative(neuron.output, train_data.expected_output[j])
             } else {
                 // Hidden layers
                 // For every neuron in the hidden layer
                 // multiply the derivative of its activation function by the sum of
                 // the weights of the prevuous layer neurons
                 // multiplied by their respective derivative values
-                value = math::d_sigmoid(neuron.weighted_input_sum)
+                math::d_sigmoid(neuron.weighted_input_sum)
                     * prev_layer
                         .iter()
                         .zip(common_gradient_parts.last().unwrap())
                         .map(|(node, der)| node.weights[j] * der)
-                        .sum::<f64>();
-            }
+                        .sum::<f64>()
+            };
 
             grad_parts.push(-value);
         }
@@ -55,79 +54,58 @@ fn update_gradients<const I: usize, const H: usize, const O: usize>(
 
     // log::debug!("partial={common_gradient_parts:?}");
 
+    // {
+    //     let mut gradients = gradients.lock().unwrap();
+    //     for ((layer_gradients, layer_partial_gradient), layer_data) in gradients
+    //         .values
+    //         .iter_mut()
+    //         .zip(common_gradient_parts.iter().rev())
+    //         .zip(network_data)
+    //     {
+    //         for ((neuron_gradient, neuron_partial_gradient), neuron_data) in (*layer_gradients)
+    //             .iter_mut()
+    //             .zip(layer_partial_gradient)
+    //             .zip(layer_data)
+    //         {
+    //             for (weight, input) in neuron_gradient.weights.iter_mut().zip(neuron_data.inputs) {
+    //                 *weight += neuron_partial_gradient * input;
+    //             }
+    //             neuron_gradient.bias += neuron_partial_gradient;
+    //         }
+    //     }
+    //
+    //     // log::debug!("gradients=\n{:?}", gradients);
+    // }
+
     {
         let mut gradients = gradients.lock().unwrap();
-        for ((layer_gradients, layer_partial_gradient), layer_data) in gradients
+        gradients
             .values
             .iter_mut()
             .zip(common_gradient_parts.iter().rev())
             .zip(network_data)
-        {
-            for ((neuron_gradient, neuron_partial_gradient), neuron_data) in (*layer_gradients)
-                .iter_mut()
-                .zip(layer_partial_gradient)
-                .zip(layer_data)
-            {
-                for (weight, input) in neuron_gradient.weights.iter_mut().zip(neuron_data.inputs) {
-                    *weight += neuron_partial_gradient * input;
-                }
-                neuron_gradient.bias += neuron_partial_gradient;
-            }
-        }
+            .for_each(|((layer_gradients, layer_partial_gradient), layer_data)| {
+                (*layer_gradients)
+                    .iter_mut()
+                    .zip(layer_partial_gradient)
+                    .zip(layer_data)
+                    .for_each(
+                        |((neuron_gradient, neuron_partial_gradient), neuron_data)| {
+                            neuron_gradient
+                                .weights
+                                .iter_mut()
+                                .zip(neuron_data.inputs)
+                                .for_each(|(weight, input)| {
+                                    *weight += neuron_partial_gradient * input;
+                                });
+                            neuron_gradient.bias += neuron_partial_gradient;
+                        },
+                    );
+            });
 
         // log::debug!("gradients=\n{:?}", gradients);
     }
 }
-
-
-// fn update_gradients<const I: usize, const H: usize, const O: usize>(
-//     network_data: Vec<Vec<NeuronData>>,
-//     train_data: DataPoint<I, O>,
-//     gradients: Arc<Mutex<NetworkGradients>>,
-//     network: &mut Network<I, H, O>,
-// ) {
-//     // Gradients = changes to every neuron's weights and bias
-
-//     let initial_loss = network_loss(network.compute(train_data.input).output, train_data.expected_output);
-
-//     let mut private_gradients = NetworkGradients::new(network);
-
-//     // for every layer,
-//     for layer_id in 0..network.hidden_layers.len() {
-//         // and for every neuron within that layer,
-//         for neuron_id in 0..network.hidden_layers[layer_id].len() {
-//             // then for every weight that the neuron has,
-//             let nudge_amt = 0.001;
-//             for weight_id in 0..network.hidden_layers[layer_id][neuron_id].weights.len() {
-//                 // try nudging that weight
-//                 network.hidden_layers[layer_id][neuron_id].weights[weight_id] += nudge_amt; // up
-//                 let loss_up = network_loss(network.compute(train_data.input).output, train_data.expected_output);
-//                 network.hidden_layers[layer_id][neuron_id].weights[weight_id] -= (nudge_amt + nudge_amt); // then down
-//                 let loss_down = network_loss(network.compute(train_data.input).output, train_data.expected_output);
-//                 network.hidden_layers[layer_id][neuron_id].weights[weight_id] += nudge_amt; // then bring it back
-
-//                 // now record which nudge was beneficial.
-//                 private_gradients.values[layer_id][neuron_id].weights[weight_id] += if loss_up < loss_down {0.01} else {-0.01}; // TODO: make my gradient proportional to the loss change
-//             }
-
-//             // and also for the bias,
-//             network.hidden_layers[layer_id][neuron_id].bias += nudge_amt; // up
-//             let loss_up = network_loss(network.compute(train_data.input).output, train_data.expected_output);
-//             network.hidden_layers[layer_id][neuron_id].bias -= (nudge_amt+nudge_amt); // down
-//             let loss_down = network_loss(network.compute(train_data.input).output, train_data.expected_output);
-//             network.hidden_layers[layer_id][neuron_id].bias += nudge_amt; // restore
-//             // and record
-//             private_gradients.values[layer_id][neuron_id].bias += if loss_up < loss_down {0.01} else {-0.01}; // TODO: make my gradient proportional to the loss change
-
-
-
-//         }
-//     }
-
-//     gradients.lock().unwrap().update_with(&private_gradients);
-
-// }
-
 
 #[derive(Debug)]
 pub(crate) struct Gradient {
@@ -157,17 +135,6 @@ impl NetworkGradients {
 
         Self { values }
     }
-
-    fn update_with(&mut self, other: &Self) {
-        for (my_layer, other_layer) in self.values.iter_mut().zip(&other.values) {
-            for (my_neuron, other_neuron) in my_layer.iter_mut().zip(other_layer) {
-                my_neuron.bias += other_neuron.bias;
-                for (my_weight, other_weight) in my_neuron.weights.iter_mut().zip(&other_neuron.weights) {
-                    *my_weight += other_weight;
-                }
-            }
-        }
-    }
 }
 
 pub fn train<const I: usize, const H: usize, const O: usize>(
@@ -179,9 +146,8 @@ pub fn train<const I: usize, const H: usize, const O: usize>(
     train_data.par_iter().for_each(|data| {
         let data = data.to_owned();
         let g = gradients.clone();
-//        let n = network.clone();
         let res = network.compute(data.input);
-        update_gradients::<I,H,O>(res.layer_data, data, g);
+        update_gradients::<I, H, O>(res.layer_data, data, g);
     });
 
     network.apply_gradients(&gradients.lock().unwrap(), learn_rate);
@@ -207,17 +173,11 @@ pub fn avg_network_loss<const I: usize, const H: usize, const O: usize>(
     network: &Network<I, H, O>,
     test_data: &[DataPoint<I, O>],
 ) -> f64 {
-    //debug!("Testing {network:?}");
     test_data
         .iter()
         .map(|data_point| {
             let res = network.compute(data_point.input);
-            let loss = network_loss(res.output, data_point.expected_output);
-            // debug!(
-            //     "For {:?}, got {:?}, which is a loss of {loss}",
-            //     data_point.input, res.output
-            // );
-            loss
+            network_loss(res.output, data_point.expected_output)
         })
         .sum::<f64>()
         / (test_data.len() as f64)
@@ -245,11 +205,6 @@ mod test {
             .output(2)
             .finalize::<2, 1, 2>();
 
-        // network.hidden_layers[0][0].weights = vec![-1f64, 1f64];
-        // network.hidden_layers[0][0].bias = 0f64;
-        // network.hidden_layers[0][1].weights = vec![1f64, -1f64];
-        // network.hidden_layers[0][1].bias = 0f64;
-
         log::debug!("New hidden layers: {:?}", network.hidden_layers);
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(0);
@@ -266,7 +221,6 @@ mod test {
                 } else {
                     [0f64, 1f64]
                 };
-                //let expected_output = [crate::math::sigmoid(-x + 0.01f64), crate::math::sigmoid(-y + 0.01f64)];
 
                 data.push(DataPoint::<2, 2> {
                     input: [x, y],
@@ -286,7 +240,7 @@ mod test {
         //     training_data,
         //     test_batch
         // );
-        
+
         let init_loss = avg_network_loss(&network, &test_batch);
         log::info!("Initial loss: {}", init_loss);
 
