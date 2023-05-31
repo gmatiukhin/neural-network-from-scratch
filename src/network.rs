@@ -131,10 +131,12 @@ pub struct Network<const I: usize, const H: usize, const O: usize> {
 
 impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
     pub fn compute(&self, inputs: [f64; I]) -> NetworkResult<O> {
+        //log::debug!("Starting compute with inputs: {inputs:?}");
         let mut layer_result = inputs.to_vec();
         let mut layer_data = vec![];
-        for layer in &self.hidden_layers {
+        for (_i, layer) in self.hidden_layers.iter().enumerate() {
             let comp_res = Self::compute_layer(&layer_result, layer);
+            //log::debug!("Computing hidden layer {_i} results in {comp_res:?}");
             layer_result = comp_res.0;
             layer_data.push(comp_res.1);
         }
@@ -165,7 +167,7 @@ impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
                 neuron.bias += gradient.bias * learn_rate;
             });
 
-        log::debug!("values=\n{:?}", self.hidden_layers);
+        //log::debug!("values=\n{:?}", self.hidden_layers);
     }
 }
 

@@ -9,13 +9,15 @@ pub fn d_sigmoid(val: f64) -> f64 {
 
 #[cfg(test)]
 mod test {
+    use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+
     use super::*;
 
     #[test]
     fn test_sigmoid() {
-        for i in i32::MIN..=i32::MAX {
+        (i32::MIN..=i32::MAX).into_par_iter().for_each(|i| {
             let val = sigmoid(i as f64);
             assert!((0f64..=1f64).contains(&val));
-        }
+        });
     }
 }
