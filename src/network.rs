@@ -1,21 +1,102 @@
-use crate::{math, training::NetworkGradients};
+use std::sync::Arc;
+
+use crate::{
+    math::{ActivationFunction, Sigmoid},
+    training::NetworkGradients,
+};
 use log;
 use rand::Rng;
+
+#[derive(Debug)]
+pub struct NetworkBuilder {
+    input_layer_size: usize,
+    hidden_layer_sizes: Vec<usize>,
+    activation_function: ActivationFunction,
+}
+
+impl Default for NetworkBuilder {
+    fn default() -> Self {
+        Self {
+            input_layer_size: 1,
+            hidden_layer_sizes: vec![],
+            activation_function: Arc::new(Sigmoid),
+        }
+    }
+}
+
+impl NetworkBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn input(mut self, size: usize) -> Self {
+        self.input_layer_size = size;
+        log::debug!("Input size set to {size}");
+        self
+    }
+
+    pub fn hidden(mut self, size: usize) -> Self {
+        if self.hidden_layer_sizes.is_empty() {
+            self.hidden_layer_sizes = vec![size];
+        } else {
+            self.hidden_layer_sizes.push(size);
+        }
+        log::debug!(
+            "Added a hidden layer to the network. Now it has {} hidden layers, latest is size {size}",
+            self.hidden_layer_sizes.len()
+        );
+        self
+    }
+
+    pub fn activation(mut self, activation_function: ActivationFunction) -> Self {
+        self.activation_function = activation_function;
+        log::debug!("Set activation function to {:?}", self.activation_function);
+        self
+    }
+
+    pub fn finalize<const I: usize, const H: usize, const O: usize>(
+        mut self,
+    ) -> Network<I, { H + 1 }, O> {
+        self.hidden_layer_sizes.push(O);
+        log::debug!("Added the output layer with size: {O}");
+
+        let mut layers: Vec<Vec<Neuron>> = vec![vec![]; self.hidden_layer_sizes.len()];
+        let mut prev_layer_size = I;
+
+        layers
+            .iter_mut()
+            .zip(self.hidden_layer_sizes)
+            .enumerate()
+            .for_each(|(i, (a, b))| {
+                log::debug!("Layer {i} being filled with {b} neurons with prev_layer_size: {prev_layer_size}");
+                for _ in 0..b {
+                    a.push(Neuron::new(prev_layer_size, &self.activation_function));
+                }
+                prev_layer_size = b;
+            });
+        log::debug!("Hidden layers:\n{layers:#?}");
+        Network {
+            hidden_layers: layers.try_into().unwrap(),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct Neuron {
     pub(crate) weights: Vec<f64>,
     pub(crate) bias: f64,
+    pub(crate) activation_function: ActivationFunction,
 }
 
 impl Neuron {
-    fn new(num_inputs: usize) -> Self {
+    fn new(num_inputs: usize, activation_function: &ActivationFunction) -> Self {
         let mut rng = rand::thread_rng();
         let mut weights = vec![0f64; num_inputs];
         rng.fill(weights.as_mut_slice());
         Self {
             weights,
             bias: rng.gen(),
+            activation_function: activation_function.clone(),
         }
     }
 
@@ -27,7 +108,7 @@ impl Neuron {
             .map(|(w, i)| i * w)
             .fold(self.bias, |acc, x| acc + x);
 
-        let output = math::sigmoid(weighted_input_sum);
+        let output = self.activation_function.activate(weighted_input_sum);
 
         let data = NeuronData {
             weighted_input_sum,
@@ -35,6 +116,7 @@ impl Neuron {
             inputs: inputs.to_vec(),
             weights: self.weights.clone(),
             bias: self.bias,
+            activation_function: self.activation_function.clone(),
         };
 
         (output, data)
@@ -48,77 +130,9 @@ pub struct NeuronData {
     pub bias: f64,
     pub output: f64,
     pub weighted_input_sum: f64,
+    pub activation_function: ActivationFunction,
 }
 
-pub struct NetworkBuilder {
-    input_layer_size: usize,
-    hidden_layer_sizes: Vec<usize>,
-    output_layer_size: usize,
-}
-
-impl Default for NetworkBuilder {
-    fn default() -> Self {
-        Self {
-            input_layer_size: 1,
-            hidden_layer_sizes: vec![],
-            output_layer_size: 1,
-        }
-    }
-}
-
-impl NetworkBuilder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn input(mut self, size: usize) -> Self {
-        log::debug!("Input size set to {size}");
-        self.input_layer_size = size;
-        self
-    }
-
-    pub fn hidden(mut self, size: usize) -> Self {
-        if self.hidden_layer_sizes.is_empty() {
-            self.hidden_layer_sizes = vec![size];
-            log::debug!("Hidden layers now has single layer of size {size}");
-        } else {
-            self.hidden_layer_sizes.push(size);
-            log::debug!(
-                "Now has {} hidden layers, latest is size {size}",
-                self.hidden_layer_sizes.len()
-            );
-        }
-        self
-    }
-
-    pub fn output(mut self, size: usize) -> Self {
-        log::debug!("Input size set to {size}");
-        self.output_layer_size = size;
-        self
-    }
-
-    pub fn finalize<const I: usize, const H: usize, const O: usize>(self) -> Network<I, H, O> {
-        let mut layers: Vec<Vec<Neuron>> = vec![vec![]; H];
-        let mut prev_layer_size = I;
-        layers
-            .iter_mut()
-            .zip(self.hidden_layer_sizes)
-            .enumerate()
-            .for_each(|(i, (a, b))| {
-                log::debug!("Layer {i} being filled with {b} neurons with prev_layer_size: {prev_layer_size}");
-                for _ in 0..b {
-                    a.push(Neuron::new(prev_layer_size));
-                }
-                prev_layer_size = b;
-            });
-        log::debug!("hidden layers: {:?}", layers);
-        Network {
-            hidden_layers: layers.try_into().unwrap(),
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct NetworkResult<const O: usize> {
     pub output: [f64; O],
     pub layer_data: Vec<Vec<NeuronData>>,
@@ -131,12 +145,10 @@ pub struct Network<const I: usize, const H: usize, const O: usize> {
 
 impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
     pub fn compute(&self, inputs: [f64; I]) -> NetworkResult<O> {
-        //log::debug!("Starting compute with inputs: {inputs:?}");
         let mut layer_result = inputs.to_vec();
         let mut layer_data = vec![];
-        for (_i, layer) in self.hidden_layers.iter().enumerate() {
+        for layer in &self.hidden_layers {
             let comp_res = Self::compute_layer(&layer_result, layer);
-            //log::debug!("Computing hidden layer {_i} results in {comp_res:?}");
             layer_result = comp_res.0;
             layer_data.push(comp_res.1);
         }
@@ -166,8 +178,6 @@ impl<const I: usize, const H: usize, const O: usize> Network<I, H, O> {
                     });
                 neuron.bias += gradient.bias * learn_rate;
             });
-
-        //log::debug!("values=\n{:?}", self.hidden_layers);
     }
 }
 
@@ -177,7 +187,7 @@ mod test {
 
     fn do_log() {
         std::env::set_var("RUST_LOG", "debug");
-        env_logger::init();
+        let _ = env_logger::builder().is_test(true).try_init();
     }
 
     #[test]
@@ -186,7 +196,6 @@ mod test {
         let net = NetworkBuilder::new()
             .input(1)
             .hidden(1)
-            .output(1)
             .finalize::<1, 1, 1>();
         assert!(net.compute([1f64]).output[0] >= 0f64);
     }
@@ -197,9 +206,7 @@ mod test {
         let net = NetworkBuilder::new()
             .input(2)
             .hidden(2)
-            .hidden(2)
-            .output(2)
-            .finalize::<2, 2, 2>();
+            .finalize::<2, 1, 2>();
         assert!(net.compute([1f64, 3.5]).output[0] >= 0f64);
     }
 }

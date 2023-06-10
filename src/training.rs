@@ -1,11 +1,7 @@
-use log::debug;
 use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
 
-use crate::{
-    math,
-    network::{Network, NeuronData},
-};
+use crate::network::{Network, NeuronData};
 
 #[derive(Debug, Clone, Copy)]
 pub struct DataPoint<const I: usize, const O: usize> {
@@ -30,7 +26,9 @@ fn update_gradients<const I: usize, const H: usize, const O: usize>(
                 // For every neuron in the output layer:
                 // multiply the derivative of its activation function by
                 // the derivative of the loss function
-                math::d_sigmoid(neuron.weighted_input_sum)
+                neuron
+                    .activation_function
+                    .derivative(neuron.weighted_input_sum)
                     * node_loss_derivative(neuron.output, train_data.expected_output[j])
             } else {
                 // Hidden layers
@@ -38,7 +36,9 @@ fn update_gradients<const I: usize, const H: usize, const O: usize>(
                 // multiply the derivative of its activation function by the sum of
                 // the weights of the prevuous layer neurons
                 // multiplied by their respective derivative values
-                math::d_sigmoid(neuron.weighted_input_sum)
+                neuron
+                    .activation_function
+                    .derivative(neuron.weighted_input_sum)
                     * prev_layer
                         .iter()
                         .zip(common_gradient_parts.last().unwrap())
@@ -53,29 +53,6 @@ fn update_gradients<const I: usize, const H: usize, const O: usize>(
     }
 
     // log::debug!("partial={common_gradient_parts:?}");
-
-    // {
-    //     let mut gradients = gradients.lock().unwrap();
-    //     for ((layer_gradients, layer_partial_gradient), layer_data) in gradients
-    //         .values
-    //         .iter_mut()
-    //         .zip(common_gradient_parts.iter().rev())
-    //         .zip(network_data)
-    //     {
-    //         for ((neuron_gradient, neuron_partial_gradient), neuron_data) in (*layer_gradients)
-    //             .iter_mut()
-    //             .zip(layer_partial_gradient)
-    //             .zip(layer_data)
-    //         {
-    //             for (weight, input) in neuron_gradient.weights.iter_mut().zip(neuron_data.inputs) {
-    //                 *weight += neuron_partial_gradient * input;
-    //             }
-    //             neuron_gradient.bias += neuron_partial_gradient;
-    //         }
-    //     }
-    //
-    //     // log::debug!("gradients=\n{:?}", gradients);
-    // }
 
     {
         let mut gradients = gradients.lock().unwrap();
@@ -193,17 +170,18 @@ mod test {
 
     fn do_log() {
         std::env::set_var("RUST_LOG", "debug");
-        env_logger::init();
+        let _ = env_logger::builder().is_test(false).try_init();
     }
 
     #[test]
     fn test_learning() {
         do_log();
+        log::info!("Starting test_learning");
         let mut network = NetworkBuilder::new()
             .input(2)
-            .hidden(2)
-            .output(2)
-            .finalize::<2, 1, 2>();
+            // .hidden(2)
+            // .activation(Arc::new(ReLU))
+            .finalize::<2, 0, 2>();
 
         log::debug!("New hidden layers: {:?}", network.hidden_layers);
 
@@ -211,16 +189,18 @@ mod test {
 
         let (training_data, test_batch) = {
             let mut data = vec![];
-            for _ in 0..1000 {
+            for _ in 0..100000 {
                 let x: f64 = rng.gen();
                 let y: f64 = rng.gen();
 
-                let line = |x: f64| -> f64 { x };
-                let expected_output = if y <= line(x) {
-                    [1f64, 0f64]
-                } else {
-                    [0f64, 1f64]
-                };
+                // let line = |x: f64| -> f64 { x };
+                // let expected_output = if y <= line(x) {
+                //     [1f64, 0f64]
+                // } else {
+                //     [0f64, 1f64]
+                // };
+
+                let expected_output = [x, x];
 
                 data.push(DataPoint::<2, 2> {
                     input: [x, y],
@@ -235,11 +215,6 @@ mod test {
             let test = train_data.pop().unwrap();
             (train_data, test)
         };
-        // log::debug!(
-        //     "data\ntraining: {:?}\ntest: {:?}",
-        //     training_data,
-        //     test_batch
-        // );
 
         let init_loss = avg_network_loss(&network, &test_batch);
         log::info!("Initial loss: {}", init_loss);
@@ -248,7 +223,7 @@ mod test {
 
         for _ in 0..10000 {
             for batch in &training_data {
-                train(&mut network, batch.to_vec(), 0.001);
+                train(&mut network, batch.to_vec(), 0.01);
                 // log::debug!("{network:?}");
                 let avg_loss = avg_network_loss(&network, &test_batch);
                 log::info!("Avg loss: {}", avg_loss);
