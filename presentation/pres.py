@@ -55,16 +55,16 @@ class NeuralNetworkPresentation(Slide):
         self.all_fadeout()
 
     def a_silly_example(self):
-        fruit0 = ImageMobject("assets/fruit0.png").scale(0.5).shift(2 * LEFT)
-        fruit1 = ImageMobject("assets/fruit1.png").scale(0.5)
-        fruit2 = ImageMobject("assets/fruit2.png").scale(0.5).shift(2 * RIGHT)
+        fruit0 = ImageMobject("assets/fruit0.png").shift(3 * LEFT)
+        fruit1 = ImageMobject("assets/fruit1.png")
+        fruit2 = ImageMobject("assets/fruit2.png").shift(3 * RIGHT)
 
-        self.add(fruit1)
+        self.play(FadeIn(fruit1))
         self.tinywait()
         self.next_slide()
 
-        self.add(fruit0)
-        self.add(fruit2)
+        self.play(FadeIn(fruit0))
+        self.play(FadeIn(fruit2))
         self.tinywait()
         self.next_slide()
 
@@ -1341,7 +1341,7 @@ class NeuralNetworkPresentation(Slide):
 
     def construct(self):
         self.title_slide()
-        # self.a_silly_example()
+        self.a_silly_example()
         self.decision_bondary()
         self.simple_network()
         # self.neuron_code_example()
