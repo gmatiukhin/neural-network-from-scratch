@@ -55,9 +55,9 @@ class NeuralNetworkPresentation(Slide):
         self.all_fadeout()
 
     def a_silly_example(self):
-        fruit0 = ImageMobject("assets/fruit0.png").shift(3 * LEFT)
-        fruit1 = ImageMobject("assets/fruit1.png")
-        fruit2 = ImageMobject("assets/fruit2.png").shift(3 * RIGHT)
+        fruit0 = ImageMobject("assets/fruit0.png").scale(0.7).shift(3 * LEFT)
+        fruit1 = ImageMobject("assets/fruit1.png").scale(0.7)
+        fruit2 = ImageMobject("assets/fruit2.png").scale(0.7).shift(3 * RIGHT)
 
         self.play(FadeIn(fruit1))
         self.tinywait()
