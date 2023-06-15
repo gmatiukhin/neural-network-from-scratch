@@ -55,8 +55,19 @@ class NeuralNetworkPresentation(Slide):
         self.all_fadeout()
 
     def a_silly_example(self):
-        logger.warn("Empty slide")
-        self.add(Tex("TODO: a silly example"))
+        fruit0 = ImageMobject("assets/fruit0.png").scale(0.5).shift(2 * LEFT)
+        fruit1 = ImageMobject("assets/fruit1.png").scale(0.5)
+        fruit2 = ImageMobject("assets/fruit2.png").scale(0.5).shift(2 * RIGHT)
+
+        self.add(fruit1)
+        self.tinywait()
+        self.next_slide()
+
+        self.add(fruit0)
+        self.add(fruit2)
+        self.tinywait()
+        self.next_slide()
+
         self.all_fadeout()
 
     def decision_bondary(self):
@@ -574,7 +585,7 @@ class NeuralNetworkPresentation(Slide):
 
     def activation_function(self):
         label = Tex("Нелинейная функция активации", tex_template=tex_template)
-        self.play(Writelabel))
+        self.play(Write(label))
         self.tinywait()
         self.next_slide()
 
@@ -849,7 +860,7 @@ class NeuralNetworkPresentation(Slide):
             .shift(5 * LEFT + DOWN * 2)
         )
 
-        self.play(Create(safe[0]), Write(safe[1]), Create(poisonous[0], Write(poisonous[1])))
+        self.play(Create(safe[0]), Write(safe[1]), Create(poisonous[0]), Write(poisonous[1]))
         self.tinywait()
         self.next_slide()
 
@@ -1329,15 +1340,15 @@ class NeuralNetworkPresentation(Slide):
         self.all_fadeout()
 
     def construct(self):
-        # self.title_slide()
+        self.title_slide()
         # self.a_silly_example()
-        # self.decision_bondary()
+        self.decision_bondary()
         self.simple_network()
         # self.neuron_code_example()
-        # self.simple_playground()
-        # self.hidden_layers()
-        # self.activation_function()
-        # self.activation_playgroud()
-        # self.loss_function()
-        # self.gradient_descent()
-        # self.calculus()
+        self.simple_playground()
+        self.hidden_layers()
+        self.activation_function()
+        self.activation_playgroud()
+        self.loss_function()
+        self.gradient_descent()
+        self.calculus()
