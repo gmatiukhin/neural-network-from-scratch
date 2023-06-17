@@ -28,6 +28,7 @@ labels = example_ax.get_axis_labels(
 # Dots for 2d example
 x_values = []
 y_values = []
+random.seed(1)
 for _ in range(200):
     x_values.append(round(random.uniform(0.0, x_max), 2))
     y_values.append(round(random.uniform(0.0, y_max), 2))
@@ -556,7 +557,7 @@ class NeuralNetworkPresentation(Slide):
                 self.tinywait()
 
             wi_label = (
-                MathTex(rf"weighted\_input_{c + 1, 1}", color=BLUE)
+                MathTex(rf"weighted\_input_{{ {c + 1}, 1}}", color=BLUE)
                 .scale(0.5)
                 .next_to(h, LEFT)
             )
@@ -574,7 +575,7 @@ class NeuralNetworkPresentation(Slide):
                 self.play(line.animate.set_color(DARK_GRAY), run_time=0.5)
 
             wi_label = (
-                MathTex(rf"weighted\_input_{c + 1, 2}", color=GREEN)
+                MathTex(rf"weighted\_input_{{ {c + 1}, 2}}", color=GREEN)
                 .scale(0.5)
                 .next_to(o, LEFT)
             )
@@ -729,10 +730,9 @@ class NeuralNetworkPresentation(Slide):
         label = (
             VGroup(Tex("Weights"), weights, Tex("Biases"), biases)
             .scale(0.5)
-            .arrange(DOWN)
-            .next_to(example_ax, RIGHT)
+            .arrange(DOWN).next_to(example_ax, RIGHT)
         )
-        self.play(Write(label))
+        self.play(*[Write(x) for x in label])
 
         self.next_slide()
         self.all_fadeout()
@@ -755,16 +755,16 @@ class NeuralNetworkPresentation(Slide):
         )
 
         output_labels = VGroup(
-            MathTex("output_1").scale(0.5).next_to(outputs[0], RIGHT),
-            MathTex("output_2").scale(0.5).next_to(outputs[1], RIGHT),
+            MathTex("output_1").scale(0.7).next_to(outputs[0], RIGHT),
+            MathTex("output_2").scale(0.7).next_to(outputs[1], RIGHT),
         )
         output_safe = VGroup(
-            MathTex("output_1 = 1").scale(0.5).next_to(outputs[0], RIGHT),
-            MathTex("output_2 = 0").scale(0.5).next_to(outputs[1], RIGHT),
+            MathTex("output_1 = 1").scale(0.7).next_to(outputs[0], RIGHT),
+            MathTex("output_2 = 0").scale(0.7).next_to(outputs[1], RIGHT),
         )
         output_poisonous = VGroup(
-            MathTex("output_1 = 0").scale(0.5).next_to(outputs[0], RIGHT),
-            MathTex("output_2 = 1").scale(0.5).next_to(outputs[1], RIGHT),
+            MathTex("output_1 = 0").scale(0.7).next_to(outputs[0], RIGHT),
+            MathTex("output_2 = 1").scale(0.7).next_to(outputs[1], RIGHT),
         )
 
         weights = VGroup(
@@ -837,7 +837,7 @@ class NeuralNetworkPresentation(Slide):
             FadeIn(inputs),
             FadeIn(hidden_layer),
             FadeIn(outputs),
-            Write(output_labels),
+            FadeIn(output_labels),
         )
         self.tinywait()
         self.next_slide()
@@ -997,7 +997,7 @@ class NeuralNetworkPresentation(Slide):
         animate_descent(-0.5, learn_rate, 12)
         self.next_slide()
 
-        learn_rate = 0.73
+        learn_rate = 0.5
         learn_rate_label_2 = MathTex(rf"learn\_rate={learn_rate}").next_to(label, DOWN)
 
         self.play(
@@ -1006,7 +1006,7 @@ class NeuralNetworkPresentation(Slide):
                 learn_rate_label_2,
             )
         )
-        animate_descent(2.3, learn_rate, 15)
+        animate_descent(0.1, learn_rate, 15)
         self.next_slide()
 
         learn_rate = 0.03
@@ -1019,7 +1019,7 @@ class NeuralNetworkPresentation(Slide):
 
     def calculus(self):
         calculus_label = Tex("Математический анализ", tex_template=tex_template).scale(
-            3
+            2
         )
         self.play(FadeIn(calculus_label, run_time=0.5))
         self.tinywait()
@@ -1339,6 +1339,18 @@ class NeuralNetworkPresentation(Slide):
         self.next_slide()
         self.all_fadeout()
 
+    def thanks(self):
+        title = VGroup(
+            Tex("Спасибо за внимание!", tex_template=tex_template).scale(1),
+            Tex("https://github.com/gmatiukhin/neural-network-from-scratch", tex_template=tex_template).scale(0.5),
+        ).arrange(DOWN)
+        self.play(
+            Write(title),
+            FadeIn(ImageMobject("assets/qr.png").scale(0.3).next_to(title, DOWN))
+         )
+        self.next_slide()
+        self.all_fadeout()
+
     def construct(self):
         self.title_slide()
         self.a_silly_example()
@@ -1352,3 +1364,4 @@ class NeuralNetworkPresentation(Slide):
         self.loss_function()
         self.gradient_descent()
         self.calculus()
+        self.thanks()
